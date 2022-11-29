@@ -7,11 +7,15 @@ on:
       - ".github/workflows/test.yml"
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  BRANCH: test-${{ github.run_id }}
 
 jobs:
   test:
@@ -24,20 +28,43 @@ jobs:
       - name: Setup
         run: |
           set -x
-          echo "Setup"
+          date > foo.md
+          mkdir -p example
+          date > example/bar.md
 
       - name: Exercise
         id: exercise
         uses: ./
         with:
-          update-me: "Hello, test."
+          paths: "*.md **/*.md"
+          branch: ${{ env.BRANCH }}
+          commit-message: Tested by create-pr-action
+          title: Tested by create-pr-action
+          body: Run id is ${{ github.run_id }}
 
       - name: Verify
         env:
-          RESULT: ${{ steps.exercise.outputs.update-me }}
+          SHA: ${{ steps.exercise.outputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -x
-          test "${RESULT}" = "Hello, test."
+          git fetch origin main
+          git fetch origin "${BRANCH}"
+          git switch "${BRANCH}"
+
+          DIFF_FILES="$(git --no-pager diff --name-only origin/"${BRANCH}" origin/main)"
+          JSON="$(gh pr view "${BRANCH}" --json title,body,state)"
+          STATE="$(jq -r '.state' <<<"${JSON}")"
+          TITLE="$(jq -r '.title' <<<"${JSON}")"
+          BODY="$(jq -r '.body' <<<"${JSON}")"
+
+          test "${SHA}" = "$(git log --pretty=%H -1)"
+          test "$(echo "${DIFF_FILES}" | grep 'foo')" = 'foo.md'
+          test "$(echo "${DIFF_FILES}" | grep 'bar')" = 'example/bar.md'
+          test "${STATE}" = "OPEN"
+          test "${TITLE}" = "Tested by create-pr-action"
+          test "${BODY}" = "Run id is ${RUN_ID}"
 
   teardown:
     runs-on: ubuntu-latest
@@ -48,7 +75,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Clean up
+      - name: Close PR and delete branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -x
-          echo "Teardown"
+          gh pr close "${BRANCH}" || true
+          git push origin "${BRANCH}" --delete || true
