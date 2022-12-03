@@ -7,7 +7,6 @@ GitHub Action to create a pull request.
 ## Description
 
 Create a pull request for changes to your repository.
-
 Create PR action is designed to be used in conjunction with other steps that change files.
 This action will run following steps:
 
