@@ -1,70 +1,38 @@
 name: Test
-on:
-  workflow_dispatch:
-  pull_request:
-    paths:
-      - "action.yml"
-      - ".github/workflows/test.yml"
-
+on: [pull_request, workflow_dispatch]
 permissions:
   contents: write
   pull-requests: write
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  BRANCH: test-${{ github.run_id }}
-
 jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      BRANCH: test-${{ github.run_id }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
       - name: Setup
-        run: |
-          set -x
-          date > foo.md
-          mkdir -p example
-          date > example/bar.md
+        run: date > foo.md
 
       - name: Exercise
-        id: exercise
         uses: ./
         with:
-          paths: "*.md **/*.md"
+          paths: foo.md
           branch: ${{ env.BRANCH }}
-          commit-message: Tested by create-pr-action
-          title: Tested by create-pr-action
-          body: Run id is ${{ github.run_id }}
+          commit-message: Tested by example action
+          title: Tested by example action
+          body: 日本語もOKです。
 
       - name: Verify
-        env:
-          SHA: ${{ steps.exercise.outputs.sha }}
-          RUN_ID: ${{ github.run_id }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -x
-          git fetch origin main
-          git fetch origin "${BRANCH}"
-          git switch "${BRANCH}"
-
-          DIFF_FILES="$(git --no-pager diff --name-only origin/"${BRANCH}" origin/main)"
-          JSON="$(gh pr view "${BRANCH}" --json title,body,state)"
-          STATE="$(jq -r '.state' <<<"${JSON}")"
-          TITLE="$(jq -r '.title' <<<"${JSON}")"
-          BODY="$(jq -r '.body' <<<"${JSON}")"
-
-          test "${SHA}" = "$(git log --pretty=%H -1)"
-          test "$(echo "${DIFF_FILES}" | grep 'foo')" = 'foo.md'
-          test "$(echo "${DIFF_FILES}" | grep 'bar')" = 'example/bar.md'
-          test "${STATE}" = "OPEN"
-          test "${TITLE}" = "Tested by create-pr-action"
-          test "${BODY}" = "Run id is ${RUN_ID}"
+          JSON="$(gh pr view "${BRANCH}" --json title,body)"
+          ACTUAL_TITLE="$(jq -r '.title' <<<"${JSON}")"
+          ACTUAL_BODY="$(jq -r '.body' <<<"${JSON}")"
+          test "${ACTUAL_TITLE}" = "Tested by create-pr-action"
+          test "${ACTUAL_BODY}" = "日本語もOKです。"
 
   teardown:
     runs-on: ubuntu-latest
@@ -72,13 +40,6 @@ jobs:
     needs: [test]
     if: ${{ always() }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Close PR and delete branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -x
-          gh pr close "${BRANCH}" || true
-          git push origin "${BRANCH}" --delete || true
+      - uses: actions/checkout@v3
+      - run: gh pr close "${BRANCH}" || true
+      - run: git push origin "${BRANCH}" --delete || true
